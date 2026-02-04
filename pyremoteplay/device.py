@@ -11,7 +11,7 @@ import time
 
 import aiohttp
 from aiohttp.client_exceptions import ContentTypeError
-from pyps4_2ndscreen.media_art import async_search_ps_store, ResultItem
+#from pyps4_2ndscreen.media_art import async_search_ps_store, ResultItem
 
 from pyremoteplay.receiver import AVReceiver
 from .const import (
@@ -222,7 +222,7 @@ class RPDevice:
 
     async def _get_media_info(self, title_id: str, region="United States"):
         """Retrieve Media info."""
-        result = await async_search_ps_store(title_id, region)
+        #result = await async_search_ps_store(title_id, region)
         self._media_info = result
         if self._media_info.cover_art:
             await self._get_image(self.media_info.cover_art)
@@ -566,7 +566,7 @@ class RPDevice:
         return self.status.get("running-app-titleid")
 
     @property
-    def media_info(self) -> ResultItem:
+    def media_info(self) -> Any:
         """Return media info."""
         return self._media_info
 

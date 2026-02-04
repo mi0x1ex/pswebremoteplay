@@ -120,8 +120,8 @@ class AVReceiver(abc.ABC):
         elif codec_name.startswith("hevc"):
             codec_ctx.options = AVReceiver.AV_CODEC_OPTIONS_HEVC
         codec_ctx.pix_fmt = "yuv420p"
-        codec_ctx.flags = av.codec.context.Flags.LOW_DELAY
-        codec_ctx.flags2 = av.codec.context.Flags2.FAST
+        codec_ctx.flags = av.codec.context.Flags.low_delay
+        codec_ctx.flags2 = av.codec.context.Flags2.fast
         codec_ctx.thread_type = av.codec.context.ThreadType.AUTO
         return codec_ctx
 
@@ -162,6 +162,8 @@ class AVReceiver(abc.ABC):
 
     def _get_audio_codec(self, header: bytes):
         """Get Audio config from header. Get Audio codec."""
+        print(header)
+        print("Test")
         self._audio_config = {
             "channels": header[0],
             "bits": header[1],
