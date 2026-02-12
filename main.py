@@ -14,7 +14,6 @@ class ClientCommand(Enum):
 
 
 class Controller:
-	_CONFIG_COOKIE_NAME = "config"
 	_PS_IP_ARG = 'ps_ip'
 	_SERVER_IP_ARG = 'server_ip'
 	_SERVER_PORT_ARG = 'server_port'
