@@ -2,7 +2,6 @@ aiohappyeyeballs==2.6.1
 aiohttp==3.12.14
 aiosignal==1.4.0
 attrs==25.3.0
-av==15.0.0
 beautifulsoup4==4.13.4
 certifi==2025.7.14
 cffi==1.17.1

@@ -22,7 +22,7 @@ class Game:
 		users = self._device.get_users()
 		if not users:
 			raise Exception(f"Users of PS not found. IP: {self._ip_address}")
-		user = users[0]
+		user = users[1]
 		print(f"create session by user - {user}")
 		if not self._device.is_on:
 			self._device.wakeup(user)

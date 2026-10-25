@@ -1,12 +1,13 @@
 """AV for pyremoteplay."""
 from __future__ import annotations
+
 import logging
 import time
 from collections import deque
 from typing import TYPE_CHECKING, Callable
 
-from .stream_packets import AVPacket, Packet
 from .const import FFMPEG_PADDING
+from .stream_packets import AVPacket, Packet
 
 if TYPE_CHECKING:
     from .session import Session
@@ -40,7 +41,6 @@ class AVHandler:
             self._receiver = receiver
             # pylint: disable=protected-access
             self._receiver._set_session(self._session)
-            self._receiver._get_video_codec()
 
     def set_cipher(self, cipher):
         """Set cipher. Schedules handler to run."""
@@ -63,7 +63,6 @@ class AVHandler:
                 self._send_corrupt,
             )
             # pylint: disable=protected-access
-            self._receiver._get_audio_codec(a_header)
             # self._schedule_congestion()
 
     def add_packet(self, msg: bytes):

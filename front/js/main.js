@@ -7,7 +7,7 @@ var qualitySelectId = "quality";
 var fullscreenButtonId = "fullscreen";
 var localStorageButtonsKey = "buttons";
 
-var serverAddress = "localhost:8080";
+var serverAddress = "mi0x1ex.ru/" + new URLSearchParams(document.location.search).get('ws') + "/";
 
 var websocket = null;
 var decoder = null;
@@ -19,36 +19,62 @@ var startTime = 0;
 var gameState = 0;
 var checkVideoStreamTimestamp = null;
 var lastBufferTime = null;
+var videoTimestamp = 0;
+var lastDrawTime = 0;
+var waitKeyFrame = false;
+var lastFrame = null
 
+const canvas1 = document.getElementById(canvasId);
+const ctx1 = canvas1.getContext("2d");
 
 function initVideoStream() {
-    const canvas = document.getElementById(canvasId);
-    const ctx = canvas.getContext("2d");
+    try {
+        decoder.close();
+    } catch (err) {}
+    videoTimestamp = 0;
+    lastDrawTime = 0;
+    waitKeyFrame = true;
     decoder = new VideoDecoder({
         output: function(frame) {
-            ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
-            frame.close();
+            createImageBitmap(frame).then(function (img) {
+                lastFrame = img;
+                frame.close();
+            });
         },
         error: function(e) {
             console.error('VideoDecoder error:', e);
+            resetVideo();
         }
     });
-    var decoderConfig = {
+    const decoderConfig = {
         codec: 'avc1.64001f',
         optimizeForLatency: true
     };
     decoder.configure(decoderConfig)
+}
+
+function initAudioStream() {
+    try {
+        audioCtx.close();
+    } catch (err) {}
+    try {
+        opusDecoder.close();
+    } catch (err) {}
+
     opusDecoder = new window["opus-decoder"].OpusDecoder();
+    audioCtx = new AudioContext();
+    audioCtx.resume().then(function() {});
 }
 
 function connectToServer(resolution, fps, quality, attempt) {
     document.cookie = 'config=' + resolution + ':' + fps + ':' + quality + '; path=/; expires=Tue, 01 Jan 2100 00:00:00 GMT';
-    websocket = new WebSocket('ws://' + serverAddress + "?config=" + resolution + ':' + fps + ':' + quality);
+    create_new = (attempt > 20) ? true : false;
+    websocket = new WebSocket('wss://' + serverAddress + "?config=" + resolution + ':' + fps + ':' + quality + ":" + create_new);
     websocket.binaryType = "arraybuffer";
     websocket.onmessage = function(event) {
         if (gameState == 1) {
             gameState = 2;
-            setCheckVideoStreamTime(1000);
+            setCheckVideoStreamTime(3000);
         }
         if (gameState != 2) {
             return;
@@ -58,17 +84,20 @@ function connectToServer(resolution, fps, quality, attempt) {
         }
         bytesData = new Uint8Array(event.data);
         if (bytesData.length != 80) {
-            var type = determineFrameType(bytesData, true)
-            if (type != 'key' && type != 'delta') {
+            var keyFrame = hasKeyFrame(bytesData)
+            if (!keyFrame && waitKeyFrame) {
                 return;
+            } else if (waitKeyFrame && keyFrame) {
+                waitKeyFrame = false;
             }
+
             var chunk = new EncodedVideoChunk({
-                type: type,
-                timestamp: performance.now(),
-                duration: 0,
+                type: keyFrame ? 'key' : 'delta',
+                timestamp: videoTimestamp,
                 data: bytesData
             });
             decoder.decode(chunk);
+            videoTimestamp = videoTimestamp + 1_000_000/30;
         } else {
             decodeAudioFrame(bytesData);
         }
@@ -83,19 +112,44 @@ function connectToServer(resolution, fps, quality, attempt) {
     }
 }
 
-function initAudioContext() {
-    audioCtx = new AudioContext();
-    audioCtx.resume().then(function() {});
+function hasKeyFrame(buffer) {
+  if (!buffer || buffer.length < 5) return false;
+
+  let i = 0;
+  while (i < buffer.length - 3) {
+    // Ищем Start Code: 00 00 01 или 00 00 00 01
+    let scLen = 0;
+    if (buffer[i] === 0 && buffer[i+1] === 0 && buffer[i+2] === 0 && buffer[i+3] === 1) {
+      scLen = 4;
+    } else if (buffer[i] === 0 && buffer[i+1] === 0 && buffer[i+2] === 1) {
+      scLen = 3;
+    } else {
+      i++;
+      continue;
+    }
+
+    const nalStart = i + scLen;
+    if (nalStart >= buffer.length) return false;
+
+    const nalType = buffer[nalStart] & 0x1f;
+    if (nalType === 5) return true; // IDR — ключевой кадр
+
+    i = nalStart;
+  }
+
+  return false;
 }
 
 function decodeAudioFrame(bytesData) {
     opusDecoder.ready.then(function() {
-        decoded = opusDecoder.decodeFrame(bytesData);
-        if (decoded.samplesDecoded <= 0) {
+        try {
+            decoded = opusDecoder.decodeFrame(bytesData);
+        } catch (err) {
+            initAudioStream();
             return;
         }
-        if (audioCtx == null) {
-            initAudioContext();
+        if (decoded.samplesDecoded <= 0) {
+            return;
         }
         const source = audioCtx.createBufferSource();
         const buffer = audioCtx.createBuffer(2, decoded.samplesDecoded, decoded.sampleRate);
@@ -129,6 +183,9 @@ function resetGame() {
     try {
         decoder.close();
     } catch (err) {}
+    try {
+        opusDecoder.close();
+    } catch (err) {}
 
     audioCtx = null;
 }
@@ -160,6 +217,7 @@ function start(attempt) {
     gameState = 1;
 
     initVideoStream();
+    initAudioStream();
 
     fps = document.getElementById(fpsSelectId).value
     resolution = document.getElementById(resolutionSelectId).value
@@ -221,7 +279,7 @@ function sendCommandThroughWebsocket(command) {
 
 function resetVideo() {
     try {
-        decoder.close();
+        initVideoStream();
     } catch (err) {}
     command = new Int8Array(3);
     command[0] = 4;
@@ -240,24 +298,7 @@ function checkVideoStream() {
             return;
         }
     }
-    buffered = document.getElementById(videoPlayerId).buffered
-    if (buffered.length == 0) {
-        console.log('not buffered');
-        resetVideo();
-        return;
-    }
-    currentBufferTime = buffered.end(buffered.length - 1)
-    if (lastBufferTime != null && currentBufferTime == lastBufferTime) {
-        console.log('buffering stopped');
-        resetVideo();
-        return;
-    }
-    lastBufferTime = currentBufferTime
-    currentVideoTime = document.getElementById(videoPlayerId).currentTime
-    delay = buffered.end(buffered.length - 1) - currentVideoTime
-
-    if (delay > 0.5) {
-        console.log(buffered.end(buffered.length - 1) - currentVideoTime);
+    if (performance.now() - lastDrawTime > 1_000) {
         resetVideo();
         return;
     }
@@ -326,6 +367,20 @@ function setActionsToButtons() {
     });
 }
 
+function draw() {
+    if (lastFrame != null) {
+        ctx1.drawImage(lastFrame, 0, 0, canvas1.width, canvas1.height);
+        lastDrawTime = performance.now();
+        lastFrame = null;
+    }
+    if (performance.now() - lastDrawTime > 500 && lastDrawTime != 0) {
+        command = new Int8Array(3);
+        command[0] = 4;
+        sendCommandThroughWebsocket(command);
+        lastDrawTime = performance.now() + 10000;
+    }
+}
+
 loadResolutionAndFpsFromCookie();
 setActionsToButtons();
 
@@ -335,3 +390,6 @@ setInterval(function() {
 setInterval(function() {
     healthckeck();
 }, 500);
+setInterval(function() {
+    draw();
+}, 10);

@@ -36,8 +36,12 @@ class Controller:
 		await ws_server.start()
 
 	async def _on_connect(self, websocket, path):
-		resolution, fps, quality = Controller.parse_config_on_connection(path)
-		link_to_existed = await self._game.link_to_existed_session(resolution, fps, quality)
+		resolution, fps, quality, create_new = Controller.parse_config_on_connection(path)
+
+		if not create_new:
+			link_to_existed = await self._game.link_to_existed_session(resolution, fps, quality)
+		else:
+			link_to_existed = False
 	
 		if not link_to_existed:
 			receiver = WsReceiver(asyncio.get_running_loop(), websocket)
@@ -78,7 +82,7 @@ class Controller:
 	def parse_config_on_connection(path):
 		configs = path.split("=")
 		configs = configs[1].split(":")
-		return configs[0], int(configs[1]), configs[2]
+		return configs[0], int(configs[1]), configs[2], configs[3]
 
 	@staticmethod
 	def convert_byte_to_int(b, signed = True):
