@@ -38,7 +38,7 @@ class Controller:
 	async def _on_connect(self, websocket, path):
 		resolution, fps, quality, create_new = Controller.parse_config_on_connection(path)
 
-		if not create_new:
+		if not (create_new == "true"):
 			link_to_existed = await self._game.link_to_existed_session(resolution, fps, quality)
 		else:
 			link_to_existed = False

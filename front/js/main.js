@@ -15,23 +15,21 @@ var audioCtx = null;
 var opusDecoder = null;
 
 var countPackets = 0;
-var startTime = 0;
+var audioStartTime = 0;
 var gameState = 0;
-var checkVideoStreamTimestamp = null;
 var lastBufferTime = null;
-var videoTimestamp = 0;
+
 var lastDrawTime = 0;
 var waitKeyFrame = false;
 var lastFrame = null
 
-const canvas1 = document.getElementById(canvasId);
-const ctx1 = canvas1.getContext("2d");
+const canvas = document.getElementById(canvasId);
+const ctx = canvas.getContext("2d");
 
 function initVideoStream() {
     try {
         decoder.close();
     } catch (err) {}
-    videoTimestamp = 0;
     lastDrawTime = 0;
     waitKeyFrame = true;
     decoder = new VideoDecoder({
@@ -43,7 +41,6 @@ function initVideoStream() {
         },
         error: function(e) {
             console.error('VideoDecoder error:', e);
-            resetVideo();
         }
     });
     const decoderConfig = {
@@ -64,6 +61,7 @@ function initAudioStream() {
     opusDecoder = new window["opus-decoder"].OpusDecoder();
     audioCtx = new AudioContext();
     audioCtx.resume().then(function() {});
+    audioStartTime = 0;
 }
 
 function connectToServer(resolution, fps, quality, attempt) {
@@ -74,7 +72,7 @@ function connectToServer(resolution, fps, quality, attempt) {
     websocket.onmessage = function(event) {
         if (gameState == 1) {
             gameState = 2;
-            setCheckVideoStreamTime(3000);
+            document.getElementById(startButtonId).innerText = "Подключено";
         }
         if (gameState != 2) {
             return;
@@ -93,11 +91,10 @@ function connectToServer(resolution, fps, quality, attempt) {
 
             var chunk = new EncodedVideoChunk({
                 type: keyFrame ? 'key' : 'delta',
-                timestamp: videoTimestamp,
+                timestamp: performance.now(),
                 data: bytesData
             });
             decoder.decode(chunk);
-            videoTimestamp = videoTimestamp + 1_000_000/30;
         } else {
             decodeAudioFrame(bytesData);
         }
@@ -117,7 +114,6 @@ function hasKeyFrame(buffer) {
 
   let i = 0;
   while (i < buffer.length - 3) {
-    // Ищем Start Code: 00 00 01 или 00 00 00 01
     let scLen = 0;
     if (buffer[i] === 0 && buffer[i+1] === 0 && buffer[i+2] === 0 && buffer[i+3] === 1) {
       scLen = 4;
@@ -132,7 +128,7 @@ function hasKeyFrame(buffer) {
     if (nalStart >= buffer.length) return false;
 
     const nalType = buffer[nalStart] & 0x1f;
-    if (nalType === 5) return true; // IDR — ключевой кадр
+    if (nalType === 5) return true;
 
     i = nalStart;
   }
@@ -158,15 +154,15 @@ function decodeAudioFrame(bytesData) {
         source.buffer = buffer;
         source.connect(audioCtx.destination);
 
-        delay = startTime - audioCtx.currentTime;
+        delay = audioStartTime - audioCtx.currentTime;
         if (delay > 0.2) {
             return;
         } else if (delay < 0.1) {
-            startTime += 0.1;
+            audioStartTime += 0.1;
         }
 
-        source.start(startTime);
-        startTime += buffer.duration;
+        source.start(audioStartTime);
+        audioStartTime += buffer.duration;
     })
 }
 
@@ -176,7 +172,7 @@ function resetGame() {
     document.getElementById(resolutionSelectId).disabled = false;
     document.getElementById(fpsSelectId).disabled = false;
     document.getElementById(qualitySelectId).disabled = false;
-    document.getElementById(startButtonId).innerText = "START";
+    document.getElementById(startButtonId).innerText = "Играть";
     try {
         audioCtx.close();
     } catch (err) {}
@@ -202,18 +198,17 @@ function enableUI() {
     document.getElementById(resolutionSelectId).disabled = false;
     document.getElementById(fpsSelectId).disabled = false;
     document.getElementById(qualitySelectId).disabled = false;
-    document.getElementById(startButtonId).innerText = "Start";
+    document.getElementById(startButtonId).innerText = "Играть";
 }
 
 function start(attempt) {
     disableUI();
-    var message = "Connection...";
+    var message = "Подключение...";
     if (attempt > 1) {
-        message += "(" + attempt + " attemp(s))"
+        message += "(" + attempt + " попыток(ка))"
     }
     document.getElementById(startButtonId).innerText = message;
 
-    startTime = 0;
     gameState = 1;
 
     initVideoStream();
@@ -239,7 +234,6 @@ function fullscreen() {
     } else if (elem.msRequestFullscreen) {
         elem.msRequestFullscreen();
     }
-    ctx = elem.getContext("2d")
     ctx.canvas.width = window.outerWidth;
     ctx.canvas.height = window.outerHeight;
 }
@@ -264,9 +258,6 @@ function loadResolutionAndFpsFromCookie() {
     document.getElementById(qualitySelectId).value = quality;
 }
 
-function setCheckVideoStreamTime(t) {
-    checkVideoStreamTimestamp = Date.now() + t
-}
 
 function sendCommandThroughWebsocket(command) {
     if (gameState != 2) {
@@ -281,28 +272,9 @@ function resetVideo() {
     try {
         initVideoStream();
     } catch (err) {}
-    command = new Int8Array(3);
-    command[0] = 4;
-    sendCommandThroughWebsocket(command);
-    setCheckVideoStreamTime(2000);
+    requestVideoKeyFrame();
 }
 
-function checkVideoStream() {
-    if (gameState != 2) {
-        return;
-    }
-    if (checkVideoStreamTimestamp != null) {
-        if (Date.now() > checkVideoStreamTimestamp) {
-            checkVideoStreamTimestamp = null
-        } else {
-            return;
-        }
-    }
-    if (performance.now() - lastDrawTime > 1_000) {
-        resetVideo();
-        return;
-    }
-}
 
 function healthckeck() {
     if (websocket != null && websocket.readyState == WebSocket.OPEN) {
@@ -310,38 +282,6 @@ function healthckeck() {
         command[0] = 0;
         websocket.send(command);
     }
-}
-
-function determineFrameType(data, isMP4) {
-    if (isMP4) {
-        const flags = new DataView(data.buffer).getUint32(0);
-        return (flags & 0x020000) ? 'key' : 'delta';
-    } else {
-        const startPos = findNalStart(data);
-        if (startPos === -1) return 'unknown';
-        const nalType = data[startPos] & 0x1F;
-        switch (nalType) {
-            case 5:
-                return 'key';
-            case 1:
-                return 'delta';
-            case 7:
-            case 8:
-                return 'config';
-            default:
-                return 'unknown';
-        }
-    }
-}
-
-function findNalStart(data) {
-    for (let i = 0; i < data.length - 3; i++) {
-        if (data[i] === 0x00 && data[i + 1] === 0x00 &&
-            (data[i + 2] === 0x01 || (data[i + 2] === 0x00 && data[i + 3] === 0x01))) {
-            return data[i + 2] === 0x01 ? i + 3 : i + 4;
-        }
-    }
-    return -1;
 }
 
 function setActionsToButtons() {
@@ -360,7 +300,6 @@ function setActionsToButtons() {
 
     document.addEventListener('fullscreenchange', function() {
         if (!document.fullscreenElement) {
-            ctx = document.getElementById(canvasId).getContext("2d")
             ctx.canvas.width = 854;
             ctx.canvas.height = 480;
         }
@@ -369,24 +308,25 @@ function setActionsToButtons() {
 
 function draw() {
     if (lastFrame != null) {
-        ctx1.drawImage(lastFrame, 0, 0, canvas1.width, canvas1.height);
+        ctx.drawImage(lastFrame, 0, 0, canvas.width, canvas.height);
         lastDrawTime = performance.now();
         lastFrame = null;
     }
     if (performance.now() - lastDrawTime > 500 && lastDrawTime != 0) {
-        command = new Int8Array(3);
-        command[0] = 4;
-        sendCommandThroughWebsocket(command);
-        lastDrawTime = performance.now() + 10000;
+        resetVideo();
+        lastDrawTime = performance.now() + 2000;
     }
+}
+
+function requestVideoKeyFrame() {
+    command = new Int8Array(3);
+    command[0] = 4;
+    sendCommandThroughWebsocket(command);
 }
 
 loadResolutionAndFpsFromCookie();
 setActionsToButtons();
 
-setInterval(function() {
-    checkVideoStream();
-}, 1000);
 setInterval(function() {
     healthckeck();
 }, 500);

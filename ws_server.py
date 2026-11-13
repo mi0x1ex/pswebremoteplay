@@ -26,8 +26,10 @@ class SingletonClientWsServer():
 
 	async def _handle_new_connection(self, websocket, path):
 		if self._client_websocket != None:
-			print(f"skip connection {websocket.remote_address[0]}")
-			return
+			try:
+				await self._client_websocket.close()
+			except Exception:
+				pass
 		self._client_websocket = websocket
 		self._client_ip = str(websocket.remote_address[0])
 		self.log("new client connected")
@@ -39,7 +41,6 @@ class SingletonClientWsServer():
 			await self._client_websocket.close()
 		except Exception:
 			pass
-		await self._on_disconnect_safety(websocket)
 		self.log("client disconnected")
 		self._client_ip = None
 		self._client_websocket = None
